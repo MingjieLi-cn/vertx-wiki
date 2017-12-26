@@ -1,18 +1,22 @@
 package io.vertx.starter;
 
+import com.github.rjeschke.txtmark.Processor;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.http.HttpServer;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.jdbc.JDBCClient;
 import io.vertx.ext.sql.SQLConnection;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.ext.web.handler.StaticHandler;
 import io.vertx.ext.web.templ.FreeMarkerTemplateEngine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -75,12 +79,13 @@ public class MainVerticle extends AbstractVerticle {
     HttpServer server = vertx.createHttpServer();
 
     Router router = Router.router(vertx);
+    router.get("/app/*").handler(StaticHandler.create().setCachingEnabled(false));
     router.get("/").handler(this::indexHandler);
-    //router.get("/wiki/:page").handler(this::pageRenderingHandler);
-    //router.post().handler(BodyHandler.create());
-    //router.post("/save").handler(this::pageUpdateHandler);
-    //router.post("/create").handler(this::pageCreateHandler);
-    //router.post("/delete").handler(this::pageDeletionHandler);
+    router.get("/wiki/:page").handler(this::pageRenderingHandler);
+    router.post().handler(BodyHandler.create());
+    router.post("/save").handler(this::pageUpdateHandler);
+    router.post("/create").handler(this::pageCreateHandler);
+    router.post("/delete").handler(this::pageDeletionHandler);
 
     server
       .requestHandler(router::accept)
@@ -125,6 +130,119 @@ public class MainVerticle extends AbstractVerticle {
               }
             });
 
+          } else {
+            context.fail(res.cause());
+          }
+        });
+      } else {
+        context.fail(car.cause());
+      }
+    });
+  }
+
+  private static final String EMPTY_PAGE_MARKDOWN =
+    "# A new page\n" +
+      "\n" +
+      "Feel-free to write in Markdown!\n";
+
+  private void pageRenderingHandler(RoutingContext context) {
+    String page = context.request().getParam("page");
+
+    dbClient.getConnection(car -> {
+      if (car.succeeded()) {
+
+        SQLConnection connection = car.result();
+        connection.queryWithParams(SQL_GET_PAGE, new JsonArray().add(page), fetch -> {
+          connection.close();
+          if (fetch.succeeded()) {
+
+            JsonArray row = fetch.result().getResults()
+              .stream()
+              .findFirst()
+              .orElseGet(() -> new JsonArray().add(-1).add(EMPTY_PAGE_MARKDOWN));
+            Integer id = row.getInteger(0);
+            String rawContent = row.getString(1);
+
+            context.put("title", page);
+            context.put("id", id);
+            context.put("newPage", fetch.result().getResults().size() == 0 ? "yes" : "no");
+            context.put("rawContent", rawContent);
+            context.put("content", Processor.process(rawContent));
+            context.put("timestamp", new Date().toString());
+
+            templateEngine.render(context, "templates", "/page.ftl", ar -> {
+              if (ar.succeeded()) {
+                context.response().putHeader("Content-Type", "text/html");
+                context.response().end(ar.result());
+              } else {
+                context.fail(ar.cause());
+              }
+            });
+          } else {
+            context.fail(fetch.cause());
+          }
+        });
+
+      } else {
+        context.fail(car.cause());
+      }
+    });
+  }
+
+  private void pageCreateHandler(RoutingContext context) {
+    String pageName = context.request().getParam("name");
+    String location = "/wiki/" + pageName;
+    if (pageName == null || pageName.isEmpty()) {
+      location = "/";
+    }
+    context.response().setStatusCode(303);
+    context.response().putHeader("Location", location);
+    context.response().end();
+  }
+
+  private void pageUpdateHandler(RoutingContext context) {
+    String id = context.request().getParam("id");
+    String title = context.request().getParam("title");
+    String markdown = context.request().getParam("markdown");
+    boolean newPage = "yes".equals(context.request().getParam("newPage"));
+
+    dbClient.getConnection(car -> {
+      if (car.succeeded()) {
+        SQLConnection connection = car.result();
+        String sql = newPage ? SQL_CREATE_PAGE : SQL_SAVE_PAGE;
+        JsonArray params = new JsonArray();
+        if (newPage) {
+          params.add(title).add(markdown);
+        } else {
+          params.add(markdown).add(id);
+        }
+        connection.updateWithParams(sql, params, res -> {
+          connection.close();
+          if (res.succeeded()) {
+            context.response().setStatusCode(303);
+            context.response().putHeader("Location", "/wiki/" + title);
+            context.response().end();
+          } else {
+            context.fail(res.cause());
+          }
+        });
+      } else {
+        context.fail(car.cause());
+      }
+    });
+  }
+
+  private void pageDeletionHandler(RoutingContext context) {
+    String id = context.request().getParam("id");
+    dbClient.getConnection(car -> {
+      if (car.succeeded()) {
+        SQLConnection connection = car.result();
+        connection.updateWithParams(SQL_DELETE_PAGE, new JsonArray().add(id), res -> {
+          connection.close();
+          if (res.succeeded()) {
+            context.response().setStatusCode(303);
+            context.response().putHeader("Location", "/");
+            context.response().end();
           } else {
             context.fail(res.cause());
           }
