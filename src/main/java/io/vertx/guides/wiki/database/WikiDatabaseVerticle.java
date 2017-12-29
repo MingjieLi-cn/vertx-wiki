@@ -2,24 +2,15 @@ package io.vertx.guides.wiki.database;
 
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
-import io.vertx.core.eventbus.Message;
-import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.jdbc.JDBCClient;
-import io.vertx.ext.sql.ResultSet;
-import io.vertx.ext.sql.SQLConnection;
-import io.vertx.serviceproxy.ProxyHandler;
-import io.vertx.serviceproxy.ProxyHelper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import io.vertx.serviceproxy.ServiceBinder;
 
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Properties;
-import java.util.stream.Collectors;
 
 public class WikiDatabaseVerticle extends AbstractVerticle {
   public static final String CONFIG_WIKIDB_JDBC_URL = "wikidb.jdbc.url";
@@ -40,7 +31,9 @@ public class WikiDatabaseVerticle extends AbstractVerticle {
 
     WikiDatabaseService.create(dbClient, sqlQueries, ready -> {
       if (ready.succeeded()) {
-        ProxyHelper.registerService(WikiDatabaseService.class, vertx, ready.result(), CONFIG_WIKIDB_QUEUE);
+        new ServiceBinder(vertx)
+          .setAddress(CONFIG_WIKIDB_QUEUE)
+          .register(WikiDatabaseService.class, ready.result());
         startFuture.complete();
       } else {
         startFuture.fail(ready.cause());
@@ -72,6 +65,8 @@ public class WikiDatabaseVerticle extends AbstractVerticle {
     sqlQueries.put(SqlQuery.CREATE_PAGE, queriesProps.getProperty("create-page"));
     sqlQueries.put(SqlQuery.SAVE_PAGE, queriesProps.getProperty("save-page"));
     sqlQueries.put(SqlQuery.DELETE_PAGE, queriesProps.getProperty("delete-page"));
+    sqlQueries.put(SqlQuery.ALL_PAGES_DATA, queriesProps.getProperty("all-pages-data"));
+    sqlQueries.put(SqlQuery.GET_PAGE_ID,queriesProps.getProperty("get-page-id"));
     return sqlQueries;
   }
 }

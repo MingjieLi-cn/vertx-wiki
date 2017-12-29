@@ -11,7 +11,9 @@ import io.vertx.ext.sql.SQLConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class WikiDatabaseServiceImpl implements WikiDatabaseService {
@@ -122,6 +124,49 @@ public class WikiDatabaseServiceImpl implements WikiDatabaseService {
       } else {
         LOGGER.error("Database query error", res.cause());
         resultHandler.handle(Future.failedFuture(res.cause()));
+      }
+    });
+    return this;
+  }
+
+  @Override
+  public WikiDatabaseService fetchAllPagesData(Handler<AsyncResult<List<JsonObject>>> resultHandler) {
+    dbClient.query(sqlQueries.get(SqlQuery.ALL_PAGES_DATA), res -> {
+      if (res.succeeded()) {
+        List<JsonObject> pages = new ArrayList<>(res.result()
+          .getResults()
+          .stream()
+          .map(json -> new JsonObject().put("id",json.getInteger(0)).put("name",json.getString(1)))
+          .sorted()
+          .collect(Collectors.toList()));
+        resultHandler.handle(Future.succeededFuture(pages));
+      } else {
+        LOGGER.error("Database query error", res.cause());
+        resultHandler.handle(Future.failedFuture(res.cause()));
+      }
+    });
+    return this;
+  }
+
+  @Override
+  public WikiDatabaseService fetchPageById(Integer id, Handler<AsyncResult<JsonObject>> resultHandler) {
+    dbClient.queryWithParams(sqlQueries.get(SqlQuery.GET_PAGE_ID), new JsonArray().add(id), fetch -> {
+      if (fetch.succeeded()) {
+        JsonObject response = new JsonObject();
+        ResultSet resultSet = fetch.result();
+        if (resultSet.getNumRows() == 0) {
+          response.put("found", false);
+        } else {
+          response.put("found", true);
+          JsonArray row = resultSet.getResults().get(0);
+          response.put("id", row.getInteger(0));
+          response.put("name",row.getString(1));
+          response.put("content", row.getString(2));
+        }
+        resultHandler.handle(Future.succeededFuture(response));
+      } else {
+        LOGGER.error("Database query error", fetch.cause());
+        resultHandler.handle(Future.failedFuture(fetch.cause()));
       }
     });
     return this;
